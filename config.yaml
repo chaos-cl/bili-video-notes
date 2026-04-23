@@ -10,11 +10,11 @@ minimax:
   model: "MiniMax-M2.7"
 
 # 本地推理（可选，需要 Apple Silicon Mac + oMLX 服务）
-# omlx:
-#   base_url: "http://localhost:8000/v1"
-#   api_key: ""
-#   llm_model: "Qwen3.6-35B-A3B-nvfp4"
-#   vlm_model: "Qwen3-VL-8B-Instruct-MLX-4bit"
+omlx:
+  base_url: "http://localhost:8000/v1"
+  api_key: ""
+  llm_model: "Qwen3.6-35B-A3B-nvfp4"
+  vlm_model: "Qwen3-VL-8B-Instruct-MLX-4bit"
 
 # 当前使用的推理服务: minimax（云端）或 omlx（本地）
 provider: "minimax"
