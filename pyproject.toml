@@ -1,0 +1,23 @@
+[project]
+name = "bilibili-notes"
+version = "0.1.0"
+description = "将 Bilibili 视频自动转换为结构化 Obsidian Markdown 笔记"
+requires-python = ">=3.12"
+dependencies = [
+    "openai>=1.0",
+    "pillow>=10.0",
+    "pyyaml>=6.0",
+    "yt-dlp>=2026.3.17",
+    "anthropic>=0.96.0",
+]
+
+[project.optional-dependencies]
+# 本地语音转录（仅 Apple Silicon macOS）
+whisper = [
+    "mlx-whisper>=0.4",
+    "modelscope>=1.36.1",
+]
+dev = [
+    "pytest>=8.0",
+    "pytest-mock>=3.12",
+]

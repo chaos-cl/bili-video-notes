@@ -1,0 +1,48 @@
+# Bilibili Notes 配置文件
+# 默认使用 MiniMax 云端推理，无需本地 GPU
+
+# ========== AI 推理服务 ==========
+
+# 云端推理（默认，推荐）
+minimax:
+  base_url: "https://api.minimaxi.com/anthropic"
+  api_key_env: "MINIMAX_API_KEY"   # 从环境变量读取 API 密钥
+  model: "MiniMax-M2.7"
+
+# 本地推理（可选，需要 Apple Silicon Mac + oMLX 服务）
+# omlx:
+#   base_url: "http://localhost:8000/v1"
+#   api_key: ""
+#   llm_model: "Qwen3.6-35B-A3B-nvfp4"
+#   vlm_model: "Qwen3-VL-8B-Instruct-MLX-4bit"
+
+# 当前使用的推理服务: minimax（云端）或 omlx（本地）
+provider: "minimax"
+
+# ========== Obsidian 配置 ==========
+
+obsidian:
+  vault_path: "~/Documents/Bilibili/Bilibili"  # 修改为你的 Obsidian vault 路径
+  notes_dir: "video-notes"                     # 笔记子目录
+  images_dir: "video-notes-images"             # 图片子目录
+
+# ========== 关键帧抽取 ==========
+
+frames:
+  scene_threshold: 0.3    # 场景变化阈值（越小越敏感，抽帧越多）
+  min_interval: 30        # 最小帧间隔（秒）
+  max_frames: 20          # 最大帧数
+  max_width: 1920         # 图片最大宽度
+
+# ========== 语音转录（可选，仅 Apple Silicon） ==========
+
+whisper:
+  model: "large-v3-turbo"
+  language: "auto"         # auto 为自动检测
+  device: "mlx"            # mlx 为 Apple Silicon GPU 加速
+
+# ========== 日志 ==========
+
+logging:
+  dir: "logs"
+  level: "INFO"
