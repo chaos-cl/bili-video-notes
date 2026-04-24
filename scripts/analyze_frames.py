@@ -22,38 +22,19 @@ def _encode_image(image_path: Path) -> str:
 def analyze_frames(
     frames: list[dict], config: dict,
 ) -> list[dict]:
-    """调用 VLM 分析帧，返回带 description 的帧列表"""
+    """调用 VLM 分析帧，返回带 description 的帧列表，支持 OpenAI 和 Anthropic 格式"""
     provider = config.get("provider", "omlx")
     client, model, api_type = get_llm_client(config, provider)
-
-    if api_type != "openai":
-        logger.warning("VLM 帧分析当前仅支持 OpenAI 兼容接口 (omlx)，跳过帧分析")
-        return frames
 
     results = []
 
     for i, frame in enumerate(frames):
         try:
             b64 = _encode_image(frame["path"])
-            response = client.chat.completions.create(
-                model=model,
-                messages=[
-                    {
-                        "role": "user",
-                        "content": [
-                            {"type": "text", "text": PROMPT},
-                            {
-                                "type": "image_url",
-                                "image_url": {
-                                    "url": f"data:image/png;base64,{b64}"
-                                },
-                            },
-                        ],
-                    }
-                ],
-                max_tokens=1024,
-            )
-            desc = response.choices[0].message.content.strip()
+            if api_type == "anthropic":
+                desc = _analyze_anthropic(client, model, b64)
+            else:
+                desc = _analyze_openai(client, model, b64)
         except Exception as e:
             logger.warning("帧 %d 分析失败: %s", frame["index"], e)
             desc = ""
@@ -61,3 +42,52 @@ def analyze_frames(
         results.append({**frame, "description": desc})
 
     return results
+
+
+def _analyze_openai(client, model: str, b64: str) -> str:
+    """OpenAI 兼容接口帧分析"""
+    response = client.chat.completions.create(
+        model=model,
+        messages=[
+            {
+                "role": "user",
+                "content": [
+                    {"type": "text", "text": PROMPT},
+                    {
+                        "type": "image_url",
+                        "image_url": {
+                            "url": f"data:image/png;base64,{b64}"
+                        },
+                    },
+                ],
+            }
+        ],
+        max_tokens=1024,
+    )
+    return response.choices[0].message.content.strip()
+
+
+def _analyze_anthropic(client, model: str, b64: str) -> str:
+    """Anthropic 兼容接口帧分析"""
+    import anthropic
+    response = client.messages.create(
+        model=model,
+        max_tokens=1024,
+        messages=[
+            {
+                "role": "user",
+                "content": [
+                    {"type": "text", "text": PROMPT},
+                    {
+                        "type": "image",
+                        "source": {
+                            "type": "base64",
+                            "media_type": "image/png",
+                            "data": b64,
+                        },
+                    },
+                ],
+            }
+        ],
+    )
+    return "\n".join(block.text for block in response.content if hasattr(block, "text")).strip()

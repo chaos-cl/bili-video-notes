@@ -11,7 +11,7 @@
 - **双 LLM 引擎** — 本地 oMLX（免费、离线）或云端 MiniMax（高质量）
 - **智能转录** — 有字幕直接用字幕，无字幕时才下载音频用 mlx-whisper 本地转录
 - **关键帧抽取** — ffmpeg 场景变化检测，自动回退等间隔采样，重跑时自动清理旧帧
-- **帧画面理解** — VLM 逐帧分析生成中文描述（跟随 provider 配置）
+- **帧画面理解** — VLM 逐帧分析生成中文描述（支持 omlx 和 minimax 两种 provider）
 - **Obsidian 联动** — 笔记和图片直接保存到 Obsidian vault，图片用相对路径引用，路径安全校验
 - **健壮设计** — 数据获取硬失败、YAML frontmatter 安全生成、CLI 参数正确穿透、中间产物可控清理
 
@@ -198,7 +198,7 @@ bilibili-notes/
 │   ├── fetch_data.py         # bili CLI 数据获取：视频信息、字幕、评论、延迟音频下载
 │   ├── extract_frames.py     # yt-dlp 下载 + ffmpeg 关键帧抽取（清理旧帧 + 返回码检查）
 │   ├── transcribe_audio.py   # mlx-whisper 本地语音转录（延迟导入）
-│   ├── analyze_frames.py     # VLM 逐帧视觉识别（跟随 provider 配置）
+│   ├── analyze_frames.py     # VLM 逐帧视觉识别（支持 OpenAI + Anthropic 格式）
 │   ├── generate_notes.py     # LLM 融合所有信息生成 Markdown（安全 YAML + 长度截断）
 │   └── pipeline.py           # 流水线编排 + CLI 入口（参数穿透 + 硬失败 + force 清理）
 ├── templates/
