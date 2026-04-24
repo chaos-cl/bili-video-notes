@@ -27,6 +27,11 @@ bili status && ffmpeg -version >/dev/null 2>&1 && yt-dlp --version >/dev/null 2>
 
 若 `MINIMAX_API_KEY` 未设置，使用 `--provider omlx` 或提示用户设置。
 
+## 架构说明
+
+- **帧分析**：固定使用本地 oMLX VLM（`vlm_model`），不受 `--provider` 切换影响
+- **笔记生成**：由 `--provider` 控制，可选 `omlx`（本地）或 `minimax`（云端）
+
 ## 关键文件
 
 | 文件 | 职责 |

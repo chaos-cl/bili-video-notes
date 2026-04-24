@@ -8,10 +8,10 @@
 
 - **多格式输入** — 支持 BV号、视频 URL、b23.tv 短链、UP主名/UID，按输入模式严格解析
 - **批量处理** — 指定UP主即可批量生成其最新视频的笔记
-- **双 LLM 引擎** — 本地 oMLX（免费、离线）或云端 MiniMax（高质量）
+- **双 LLM 引擎** — 本地 oMLX（免费、离线）或云端 MiniMax（高质量），仅控制笔记生成
 - **智能转录** — 有字幕直接用字幕，无字幕时才下载音频用 mlx-whisper 本地转录
 - **关键帧抽取** — ffmpeg 场景变化检测，自动回退等间隔采样，重跑时自动清理旧帧
-- **帧画面理解** — VLM 逐帧分析生成中文描述（omlx 用 OpenAI 兼容接口；minimax 用 VLM 专用 API）
+- **帧画面理解** — 本地 VLM 逐帧分析生成中文描述（固定使用 oMLX，不受 provider 切换影响）
 - **Obsidian 联动** — 笔记和图片直接保存到 Obsidian vault，图片用相对路径引用，路径安全校验
 - **健壮设计** — 数据获取硬失败、YAML frontmatter 安全生成、CLI 参数正确穿透、中间产物可控清理
 
@@ -27,11 +27,11 @@
 | ffmpeg | any | 视频处理和关键帧抽取 |
 | yt-dlp | >= 2026.3 | 视频下载 |
 
-**本地推理（可选）：**
-- oMLX 服务运行在 `localhost:8000`，加载 VLM + LLM 模型
+**本地推理（帧分析必需，笔记生成可选）：**
+- oMLX 服务运行在 `localhost:8000`，VLM 模型用于帧分析（必须），LLM 模型用于笔记生成（可选）
 - mlx-whisper 用于本地语音转录（延迟加载，仅在使用时才需要）
 
-**云端推理（可选）：**
+**云端推理（笔记生成可选）：**
 - MiniMax API（Anthropic 兼容格式），环境变量 `MINIMAX_API_KEY`
 
 ### 2. 安装
@@ -63,21 +63,20 @@ ffmpeg -version
 编辑 `config.yaml`：
 
 ```yaml
-# 本地 oMLX 推理服务
+# 本地 oMLX 推理服务（帧分析固定使用，笔记生成可选）
 omlx:
   base_url: "http://localhost:8000/v1"
   api_key_env: "OMLX_API_KEY"                    # 从环境变量读取密钥
   llm_model: "Qwen3.6-35B-A3B-nvfp4"            # 文本生成模型
-  vlm_model: "Qwen3-VL-8B-Instruct-MLX-4bit"    # 视觉理解模型（仅 omlx 使用）
+  vlm_model: "Qwen3-VL-8B-Instruct-MLX-4bit"    # 视觉理解模型（帧分析固定使用）
 
-# 云端 MiniMax 推理服务（Anthropic 兼容 API）
+# 云端 MiniMax 推理服务（Anthropic 兼容 API，笔记生成可选）
 minimax:
-  api_host: "https://api.minimaxi.com"           # API 基础地址（VLM 帧分析使用）
-  base_url: "https://api.minimaxi.com/anthropic" # Anthropic 兼容端点（笔记生成使用）
-  api_key_env: "MINIMAX_API_KEY"    # 从环境变量读取密钥
+  base_url: "https://api.minimaxi.com/anthropic" # Anthropic 兼容端点
+  api_key_env: "MINIMAX_API_KEY"                 # 从环境变量读取密钥
   model: "MiniMax-M2.7"
 
-# 默认使用的推理服务: omlx 或 minimax
+# 笔记生成的 LLM 提供者（帧分析始终使用本地 oMLX VLM）
 provider: "minimax"
 
 # Obsidian vault 配置
@@ -199,7 +198,7 @@ bilibili-notes/
 │   ├── fetch_data.py         # bili CLI 数据获取：视频信息、字幕、评论、延迟音频下载
 │   ├── extract_frames.py     # yt-dlp 下载 + ffmpeg 关键帧抽取（清理旧帧 + 返回码检查）
 │   ├── transcribe_audio.py   # mlx-whisper 本地语音转录（延迟导入）
-│   ├── analyze_frames.py     # VLM 逐帧视觉识别（OpenAI 兼容接口 + MiniMax VLM 专用 API）
+│   ├── analyze_frames.py     # VLM 逐帧视觉识别（固定使用本地 oMLX VLM）
 │   ├── generate_notes.py     # LLM 融合所有信息生成 Markdown（安全 YAML + 长度截断）
 │   └── pipeline.py           # 流水线编排 + CLI 入口（参数穿透 + 硬失败 + force 清理）
 ├── templates/
@@ -291,7 +290,7 @@ results = run_pipeline("影视飓风", mode="user", max_videos=10)
 | `音频下载失败` | 网络或权限问题 | 检查 `bili auth` 登录状态 |
 | `关键帧0帧` | 场景变化阈值过高 | 自动回退等间隔采样，或降低 `scene_threshold` |
 | `MINIMAX_API_KEY 未设置` | 环境变量缺失 | `export MINIMAX_API_KEY="..."` 或切换 `--provider omlx` |
-| `oMLX 连接失败` | 本地服务未启动 | 启动 oMLX 或使用 `--provider minimax` |
+| `oMLX 连接失败` | 本地服务未启动 | 启动 oMLX（帧分析必须）；笔记生成可切换 `--provider minimax` |
 | `yt-dlp cookies 错误` | 浏览器 cookies 过期 | 使用 `--cookies-from-browser chrome` 或重新登录 |
 | `配置文件缺少必填字段` | config.yaml 不完整 | 补全 obsidian/omlx/provider 字段 |
 | `路径跳出了 vault 根目录` | notes_dir/images_dir 配置有误 | 检查配置中是否包含 `../` 等跳转路径 |

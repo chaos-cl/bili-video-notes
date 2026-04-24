@@ -79,6 +79,17 @@ def get_omlx_client(config: dict) -> OpenAI:
     )
 
 
+def get_vlm_client(config: dict) -> tuple[OpenAI, str]:
+    """获取本地 VLM 客户端（固定使用 oMLX，不受 provider 切换影响）"""
+    api_key = os.getenv(config["omlx"].get("api_key_env", "OMLX_API_KEY"), "")
+    client = OpenAI(
+        base_url=config["omlx"]["base_url"],
+        api_key=api_key,
+    )
+    model = config["omlx"].get("vlm_model", config["omlx"].get("llm_model", ""))
+    return client, model
+
+
 def get_llm_client(config: dict, provider: str | None = None):
     """根据 provider 返回对应的 LLM 客户端和模型名
 
