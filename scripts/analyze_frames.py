@@ -22,19 +22,25 @@ def _encode_image(image_path: Path) -> str:
 def analyze_frames(
     frames: list[dict], config: dict,
 ) -> list[dict]:
-    """调用 VLM 分析帧，返回带 description 的帧列表，支持 OpenAI 和 Anthropic 格式"""
+    """调用 VLM 分析帧，返回带 description 的帧列表
+
+    支持 OpenAI 兼容接口（omlx 等具备视觉能力的本地/云端模型）。
+    若当前 provider 不支持视觉输入则跳过帧分析。
+    """
     provider = config.get("provider", "omlx")
     client, model, api_type = get_llm_client(config, provider)
+
+    # Anthropic 兼容接口（如 MiniMax）通常不支持图片输入，跳过帧分析
+    if api_type == "anthropic":
+        logger.info("当前 provider (%s) 不支持图片输入，跳过帧分析", provider)
+        return frames
 
     results = []
 
     for i, frame in enumerate(frames):
         try:
             b64 = _encode_image(frame["path"])
-            if api_type == "anthropic":
-                desc = _analyze_anthropic(client, model, b64)
-            else:
-                desc = _analyze_openai(client, model, b64)
+            desc = _analyze_openai(client, model, b64)
         except Exception as e:
             logger.warning("帧 %d 分析失败: %s", frame["index"], e)
             desc = ""
@@ -65,29 +71,3 @@ def _analyze_openai(client, model: str, b64: str) -> str:
         max_tokens=1024,
     )
     return response.choices[0].message.content.strip()
-
-
-def _analyze_anthropic(client, model: str, b64: str) -> str:
-    """Anthropic 兼容接口帧分析"""
-    import anthropic
-    response = client.messages.create(
-        model=model,
-        max_tokens=1024,
-        messages=[
-            {
-                "role": "user",
-                "content": [
-                    {"type": "text", "text": PROMPT},
-                    {
-                        "type": "image",
-                        "source": {
-                            "type": "base64",
-                            "media_type": "image/png",
-                            "data": b64,
-                        },
-                    },
-                ],
-            }
-        ],
-    )
-    return "\n".join(block.text for block in response.content if hasattr(block, "text")).strip()

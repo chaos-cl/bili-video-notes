@@ -48,7 +48,7 @@ uv run python scripts/pipeline.py --bv BV1ABcsztEcY --config /path/to/config.yam
 2. **fetch_all** — 调用 bili CLI 获取视频信息、字幕、评论；仅无字幕时下载音频
 3. **transcribe** — 无字幕时用 mlx-whisper 本地转录音频（延迟加载，不阻塞其他流程）
 4. **extract_keyframes** — 清理旧帧后用 ffmpeg 场景变化检测抽取关键帧，失败回退等间隔采样
-5. **analyze_frames** — VLM 逐帧视觉识别生成文字描述（支持 OpenAI 和 Anthropic 两种 API 格式）
+5. **analyze_frames** — VLM 逐帧视觉识别生成文字描述（仅支持 OpenAI 兼容接口如 omlx；minimax 不支持图片输入，自动跳过）
 6. **generate_note** — LLM 融合所有信息生成结构化 Markdown 笔记（YAML frontmatter 安全生成）
 
 ## 配置
@@ -84,6 +84,6 @@ uv run python scripts/pipeline.py --bv BV1ABcsztEcY --config /path/to/config.yam
 - **字幕不可用**: 仅在无字幕时自动下载音频并用 whisper 转录，减少不必要的网络和磁盘开销
 - **关键帧0帧**: 场景检测失败后自动回退到等间隔采样模式
 - **oMLX 未启动**: 帧分析和笔记生成会失败，可切换 `--provider minimax` 使用云端
-- **VLM 帧分析**: 支持 OpenAI（omlx）和 Anthropic（minimax）两种 API 格式，均可进行帧分析
+- **VLM 帧分析**: 仅 omlx (OpenAI 兼容) 支持图片输入；minimax 不支持视觉能力，自动跳过帧分析不影响笔记生成
 - **fetch_all 失败**: 视为硬失败，不会生成失真的占位笔记
 - **--force 模式**: 同步清理旧笔记、旧帧文件和临时产物，确保重跑结果干净
