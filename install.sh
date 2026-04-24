@@ -1,7 +1,7 @@
 #!/bin/bash
 # Bilibili Notes 安装脚本
 # 用法: bash install.sh [--skip-bili] [--skip-ffmpeg] [--skip-ytdlp]
-set -e
+set -euo pipefail
 
 GREEN='\033[0;32m'
 YELLOW='\033[1;33m'
@@ -34,9 +34,8 @@ echo ""
 echo ">>> 检查 Python 环境"
 if command -v python3 &>/dev/null; then
     PY_VERSION=$(python3 -c "import sys; print(f'{sys.version_info.major}.{sys.version_info.minor}')")
-    PY_MAJOR=$(python3 -c "import sys; print(sys.version_info.major)")
-    PY_MINOR=$(python3 -c "import sys; print(sys.version_info.minor)")
-    if [ "$PY_MAJOR" -ge 3 ] && [ "$PY_MINOR" -ge 12 ]; then
+    PY_OK=$(python3 -c "import sys; print('ok' if sys.version_info >= (3, 12) else 'no')")
+    if [ "$PY_OK" = "ok" ]; then
         info "Python $PY_VERSION"
     else
         fail "需要 Python >= 3.12，当前 $PY_VERSION。请升级: brew install python@3.12"
@@ -52,7 +51,14 @@ if command -v uv &>/dev/null; then
     info "uv $(uv --version)"
 else
     warn "uv 未安装，正在安装..."
-    curl -LsSf https://astral.sh/uv/install.sh | sh
+    UV_INSTALLER=$(mktemp /tmp/uv-install.XXXXXX.sh)
+    if curl -LsSf https://astral.sh/uv/install.sh -o "$UV_INSTALLER" 2>/dev/null; then
+        sh "$UV_INSTALLER"
+        rm -f "$UV_INSTALLER"
+    else
+        rm -f "$UV_INSTALLER"
+        fail "uv 下载失败，请手动安装: https://docs.astral.sh/uv/"
+    fi
     export PATH="$HOME/.local/bin:$PATH"
     if command -v uv &>/dev/null; then
         info "uv $(uv --version)"
@@ -88,13 +94,18 @@ else
     echo "  1. brew install bilibili-cli"
     echo "  2. 从源码安装: https://github.com/public-clis/bilibili-cli"
     echo ""
-    read -p "  是否尝试 brew 安装? [y/N] " -n 1 -r
-    echo ""
-    if [[ $REPLY =~ ^[Yy]$ ]]; then
-        brew install bilibili-cli 2>/dev/null || warn "brew 安装失败，请手动安装"
-        if command -v bili &>/dev/null; then
-            info "bili 安装成功，请运行: bili auth login"
+    if command -v brew &>/dev/null; then
+        read -p "  是否尝试 brew 安装? [y/N] " -n 1 -r
+        echo ""
+        if [[ $REPLY =~ ^[Yy]$ ]]; then
+            brew install bilibili-cli 2>/dev/null || warn "brew 安装失败，请手动安装"
+            if command -v bili &>/dev/null; then
+                info "bili 安装成功，请运行: bili auth login"
+            fi
         fi
+    else
+        warn "Homebrew 未安装，无法自动安装 bili"
+        echo "  请先安装 Homebrew: /bin/bash -c \"\$(curl -fsSL https://raw.githubusercontent.com/Homebrew/install/HEAD/install.sh)\""
     fi
 fi
 
@@ -106,12 +117,17 @@ if [ "$SKIP_FFMPEG" = true ]; then
 elif command -v ffmpeg &>/dev/null; then
     info "ffmpeg $(ffmpeg -version 2>/dev/null | head -1 | awk '{print $3}')"
 else
-    warn "ffmpeg 未安装，正在安装..."
-    brew install ffmpeg
-    if command -v ffmpeg &>/dev/null; then
-        info "ffmpeg 安装成功"
+    warn "ffmpeg 未安装"
+    if command -v brew &>/dev/null; then
+        info "正在通过 brew 安装 ffmpeg..."
+        brew install ffmpeg
+        if command -v ffmpeg &>/dev/null; then
+            info "ffmpeg 安装成功"
+        else
+            fail "ffmpeg 安装失败，请手动安装: brew install ffmpeg"
+        fi
     else
-        fail "ffmpeg 安装失败，请手动安装: brew install ffmpeg"
+        fail "Homebrew 未安装，请先安装 Homebrew 或手动安装 ffmpeg"
     fi
 fi
 
@@ -123,19 +139,24 @@ if [ "$SKIP_YTDLP" = true ]; then
 elif command -v yt-dlp &>/dev/null; then
     info "yt-dlp $(yt-dlp --version)"
 else
-    warn "yt-dlp 未安装，正在安装..."
-    brew install yt-dlp
-    if command -v yt-dlp &>/dev/null; then
-        info "yt-dlp 安装成功"
+    warn "yt-dlp 未安装"
+    if command -v brew &>/dev/null; then
+        info "正在通过 brew 安装 yt-dlp..."
+        brew install yt-dlp
+        if command -v yt-dlp &>/dev/null; then
+            info "yt-dlp 安装成功"
+        else
+            fail "yt-dlp 安装失败，请手动安装: brew install yt-dlp"
+        fi
     else
-        fail "yt-dlp 安装失败，请手动安装: brew install yt-dlp"
+        fail "Homebrew 未安装，请先安装 Homebrew 或手动安装 yt-dlp"
     fi
 fi
 
 # ---------- 7. 配置 MINIMAX_API_KEY ----------
 echo ""
 echo ">>> 检查 MiniMax API 密钥"
-if [ -n "$MINIMAX_API_KEY" ]; then
+if [ -n "${MINIMAX_API_KEY:-}" ]; then
     info "MINIMAX_API_KEY 已设置"
 else
     warn "MINIMAX_API_KEY 未设置"
@@ -150,6 +171,7 @@ fi
 # ---------- 8. 检查 config.yaml ----------
 echo ""
 echo ">>> 检查配置文件"
+CONFIG_TEMPLATE="$SCRIPT_DIR/config.yaml.example"
 if [ -f "$SCRIPT_DIR/config.yaml" ]; then
     info "config.yaml 存在"
 else
@@ -157,11 +179,22 @@ else
     echo ""
     read -p "  请输入 Obsidian vault 路径 [~/Documents/Bilibili/Bilibili]: " VAULT_PATH
     VAULT_PATH="${VAULT_PATH:-~/Documents/Bilibili/Bilibili}"
-    # 更新 config.yaml 中的 vault_path
-    if command -v sed &>/dev/null; then
-        sed -i.bak "s|~/Documents/Bilibili/Bilibili|$VAULT_PATH|g" "$SCRIPT_DIR/config.yaml" 2>/dev/null || true
+    # 从模板创建 config.yaml
+    if [ -f "$CONFIG_TEMPLATE" ]; then
+        cp "$CONFIG_TEMPLATE" "$SCRIPT_DIR/config.yaml"
     fi
-    info "vault_path 已设置为: $VAULT_PATH"
+    # 安全替换 vault_path：转义 sed 特殊字符
+    ESCAPED_PATH=$(printf '%s\n' "$VAULT_PATH" | sed 's/[&/\]/\\&/g')
+    if command -v sed &>/dev/null && [ -f "$SCRIPT_DIR/config.yaml" ]; then
+        sed -i.bak "s|~/Documents/Bilibili/Bilibili|${ESCAPED_PATH}|g" "$SCRIPT_DIR/config.yaml" 2>/dev/null
+        rm -f "$SCRIPT_DIR/config.yaml.bak"
+        info "vault_path 已设置为: $VAULT_PATH"
+    else
+        warn "无法自动设置 vault_path，请手动编辑 config.yaml"
+    fi
+    if [ ! -f "$SCRIPT_DIR/config.yaml" ]; then
+        fail "config.yaml 创建失败，请手动从 config.yaml.example 复制并修改"
+    fi
 fi
 
 # ---------- 9. 创建输出目录 ----------
@@ -197,4 +230,4 @@ echo "uv:      $(uv --version 2>/dev/null || echo 'N/A')"
 echo "bili:    $(command -v bili &>/dev/null && echo '已安装' || echo '未安装')"
 echo "ffmpeg:  $(command -v ffmpeg &>/dev/null && echo '已安装' || echo '未安装')"
 echo "yt-dlp:  $(command -v yt-dlp &>/dev/null && echo '已安装' || echo '未安装')"
-echo "MiniMax: $([ -n \"$MINIMAX_API_KEY\" ] && echo '已配置' || echo '未配置')"
+echo "MiniMax: $([ -n "${MINIMAX_API_KEY:-}" ] && echo '已配置' || echo '未配置')"

@@ -5,6 +5,7 @@ import re
 import subprocess
 import time
 from pathlib import Path
+from urllib.parse import urlparse
 from urllib.request import Request, urlopen
 
 import yaml
@@ -22,12 +23,12 @@ _BILI_CALL_INTERVAL = 2  # 每次 bili 调用间隔秒数，防限流
 _RATE_LIMIT_RE = re.compile(r"412|precondition|rate.?limit", re.IGNORECASE)
 
 
-def _run_bili(args: list[str], retries: int = 3) -> str:
+def _run_bili(args: list[str], retries: int = 3, timeout: int = 120) -> str:
     """运行 bili 命令，返回 stdout。412 限流时自动重试"""
     time.sleep(_BILI_CALL_INTERVAL)
     for attempt in range(retries):
         result = subprocess.run(
-            ["bili", *args], capture_output=True, text=True,
+            ["bili", *args], capture_output=True, text=True, timeout=timeout,
         )
         # 只检查 stderr 和 stdout 中的 ok 字段，避免字幕时间戳里的数字误判
         is_rate_limited = (
@@ -68,44 +69,75 @@ def resolve_user(user_input: str) -> str:
 def resolve_input(raw_input: str, mode: str = "auto", max_videos: int = 5) -> list[str]:
     """统一解析输入为 BV 号列表
 
-    支持格式：BV号、视频URL、b23.tv短链、UP主UID/名称
+    mode: "bv", "url", "user", 或 "auto"（自动猜测）
     """
-    # BV 号直接匹配
+    if mode == "bv":
+        bv_match = BV_RE.search(raw_input)
+        if bv_match:
+            return [bv_match.group()]
+        raise ValueError(f"输入不是有效的 BV 号: {raw_input}")
+
+    if mode == "url":
+        return _resolve_url(raw_input)
+
+    if mode == "user":
+        uid = resolve_user(raw_input)
+        return _fetch_user_videos(uid, raw_input, max_videos)
+
+    # mode == "auto": 自动猜测
     bv_match = BV_RE.search(raw_input)
     if bv_match:
         return [bv_match.group()]
 
+    if "b23.tv" in raw_input:
+        return _resolve_url(raw_input)
+
+    if "bilibili.com" in raw_input:
+        return _resolve_url(raw_input)
+
+    # 当作 UP 主处理
+    uid = resolve_user(raw_input)
+    return _fetch_user_videos(uid, raw_input, max_videos)
+
+
+def _resolve_url(raw_input: str) -> list[str]:
+    """解析 URL/短链为 BV 号列表"""
     # b23.tv 短链重定向
     if "b23.tv" in raw_input:
         url = raw_input if raw_input.startswith("http") else f"https://{raw_input.strip()}"
+        parsed = urlparse(url)
+        if parsed.hostname not in ("b23.tv", "www.b23.tv"):
+            raise ValueError(f"不支持的短链域名: {parsed.hostname}")
         req = Request(url, headers={"User-Agent": "Mozilla/5.0"})
-        with urlopen(req) as resp:
+        with urlopen(req, timeout=15) as resp:
             final_url = resp.url
         bv_match = BV_RE.search(final_url)
         if bv_match:
             return [bv_match.group()]
         raise ValueError(f"短链无法解析为 BV 号: {raw_input}")
 
-    # 视频URL提取BV号
+    # bilibili.com URL 提取 BV 号
     if "bilibili.com" in raw_input:
         bv_match = BV_RE.search(raw_input)
         if bv_match:
             return [bv_match.group()]
         raise ValueError(f"URL 中未找到 BV 号: {raw_input}")
 
-    # 当作 UP 主处理
-    uid = resolve_user(raw_input)
+    raise ValueError(f"无法识别的 URL: {raw_input}")
+
+
+def _fetch_user_videos(uid: str, raw_input: str, max_videos: int) -> list[str]:
+    """获取 UP 主视频列表，失败时用搜索备选"""
     try:
         data = _run_bili_yaml(["user-videos", uid, "--max", str(max_videos)])
         raw = data.get("data", {})
-        # user-videos 返回 {"videos": [...]} 或直接返回列表
         videos = raw.get("videos", raw) if isinstance(raw, dict) else raw
         if isinstance(videos, list) and videos:
             return [v["bvid"] for v in videos if v.get("bvid")]
     except (subprocess.CalledProcessError, RuntimeError) as e:
         logger.warning("user-videos 失败: %s，尝试 search 备选", e)
 
-    # 备选：用 search --type video 搜索 UP 主名称
+    # 备选：用 search --type video 搜索，按作者 UID 过滤
     try:
         data = _run_bili_yaml(["search", raw_input, "--type", "video", "--max", str(max_videos)])
         results = data.get("data", [])
@@ -115,7 +147,8 @@ def resolve_input(raw_input: str, mode: str = "auto", max_videos: int = 5) -> li
             bvids = []
             for item in results:
                 bv = item.get("bvid", "")
-                if bv:
+                author_uid = item.get("author", {}).get("id", 0)
+                if bv and (str(author_uid) == str(uid) or not author_uid):
                     bvids.append(bv)
             if bvids:
                 return bvids
@@ -168,7 +201,7 @@ def download_audio(bvid: str, output_dir: Path) -> str | None:
     return str(m4a_files[0]) if m4a_files else None
 
 
-def fetch_all(bvid: str, work_dir: Path | None = None) -> dict:
+def fetch_all(bvid: str, work_dir: Path | None = None, need_audio: bool = False) -> dict:
     """获取单个视频的全部数据"""
     if work_dir is None:
         work_dir = get_work_dir(bvid)
@@ -182,12 +215,14 @@ def fetch_all(bvid: str, work_dir: Path | None = None) -> dict:
     logger.info("获取评论: %s", bvid)
     comments = fetch_comments(bvid)
 
-    logger.info("下载音频: %s", bvid)
-    try:
-        audio_path = download_audio(bvid, work_dir)
-    except Exception as e:
-        logger.warning("音频下载失败 %s: %s", bvid, e)
-        audio_path = None
+    # 仅在无字幕且需要转录时才下载音频
+    audio_path = None
+    if need_audio or not subtitle.get("available"):
+        logger.info("下载音频: %s", bvid)
+        try:
+            audio_path = download_audio(bvid, work_dir)
+        except Exception as e:
+            logger.warning("音频下载失败 %s: %s", bvid, e)
 
     return {
         "video": video,

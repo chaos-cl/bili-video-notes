@@ -1,10 +1,10 @@
-"""oMLX VLM 逐帧视觉识别"""
+"""VLM 逐帧视觉识别"""
 
 import base64
 import logging
 from pathlib import Path
 
-from scripts.common import get_omlx_client
+from scripts.common import get_llm_client
 
 logger = logging.getLogger(__name__)
 
@@ -20,11 +20,16 @@ def _encode_image(image_path: Path) -> str:
 
 
 def analyze_frames(
-    frames: list[dict], config: dict, batch_size: int = 3
+    frames: list[dict], config: dict,
 ) -> list[dict]:
-    """调用 oMLX VLM 分析帧，返回带 description 的帧列表"""
-    client = get_omlx_client(config)
-    model = config["omlx"]["vlm_model"]
+    """调用 VLM 分析帧，返回带 description 的帧列表"""
+    provider = config.get("provider", "omlx")
+    client, model, api_type = get_llm_client(config, provider)
+
+    if api_type != "openai":
+        logger.warning("VLM 帧分析当前仅支持 OpenAI 兼容接口 (omlx)，跳过帧分析")
+        return frames
+
     results = []
 
     for i, frame in enumerate(frames):

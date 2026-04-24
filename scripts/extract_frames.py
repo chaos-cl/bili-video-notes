@@ -43,7 +43,15 @@ def _get_duration(video_path: Path) -> float:
          "-of", "default=noprint_wrappers=1:nokey=1", str(video_path)],
         capture_output=True, text=True,
     )
-    return float(result.stdout.strip())
+    if result.returncode != 0:
+        raise RuntimeError(f"ffprobe 失败 ({video_path}): {result.stderr.strip()}")
+    output = result.stdout.strip()
+    if not output:
+        raise RuntimeError(f"ffprobe 未返回时长 ({video_path})")
+    try:
+        return float(output)
+    except ValueError:
+        raise RuntimeError(f"ffprobe 输出无法解析为时长 ({video_path}): {output!r}")
 
 
 def extract_keyframes(video_path: Path, output_dir: Path, config: dict) -> list[Path]:
@@ -54,6 +62,11 @@ def extract_keyframes(video_path: Path, output_dir: Path, config: dict) -> list[
     max_width = frames_cfg.get("max_width", 1920)
 
     output_dir.mkdir(parents=True, exist_ok=True)
+
+    # 清理旧帧文件，避免混入历史结果
+    for pattern in ("scene_*.png", "frame_*.png"):
+        for old in output_dir.glob(pattern):
+            old.unlink()
 
     # 先尝试场景变化检测
     cmd = [
@@ -68,17 +81,17 @@ def extract_keyframes(video_path: Path, output_dir: Path, config: dict) -> list[
     ]
 
     logger.info("ffmpeg 场景检测: %s", " ".join(cmd))
-    subprocess.run(cmd, capture_output=True, text=True, timeout=300)
+    result = subprocess.run(cmd, capture_output=True, text=True, timeout=300)
+    if result.returncode != 0:
+        logger.warning("ffmpeg 场景检测失败: %s", result.stderr.strip())
 
     frames = sorted(output_dir.glob("scene_*.png"))
     if frames:
-        # 重命名为标准格式
         renamed = []
         for i, f in enumerate(frames[:max_frames], 1):
             new_name = output_dir / f"frame_{i:03d}.png"
             f.rename(new_name)
             renamed.append(new_name)
-        # 清理多余的帧
         for f in frames[max_frames:]:
             f.unlink()
         logger.info("场景检测抽取到 %d 帧", len(renamed))

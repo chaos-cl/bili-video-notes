@@ -5,3 +5,7 @@ work/
 logs/*.log
 *.egg-info/
 .DS_Store
+*.bak
+config.yaml.bak
+.env*
+.env

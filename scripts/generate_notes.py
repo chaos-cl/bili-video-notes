@@ -36,6 +36,9 @@ tags: "#bilibili #标签1 #标签2"
 _ILLEGAL_CHARS = re.compile(r'[<>:"/\\|?*\x00-\x1f]')
 
 
+_MAX_CONTENT_CHARS = 80000
+
+
 def _build_prompt(
     video_info: dict,
     subtitle_text: str,
@@ -43,7 +46,7 @@ def _build_prompt(
     frames: list[dict],
     comments: list[dict],
 ) -> str:
-    """构建 LLM prompt"""
+    """构建 LLM prompt，带长度截断防止超上下文"""
     parts = []
 
     parts.append("## 视频信息")
@@ -53,10 +56,11 @@ def _build_prompt(
     parts.append(f"简介: {video_info.get('description', '')}")
 
     if subtitle_text:
-        parts.append(f"\n## 字幕内容\n{subtitle_text}")
+        parts.append(f"\n## 字幕内容\n{subtitle_text[:_MAX_CONTENT_CHARS]}")
 
     if transcript_text:
-        parts.append(f"\n## 语音转录\n{transcript_text}")
+        text = transcript_text[:_MAX_CONTENT_CHARS] if not subtitle_text else transcript_text[:_MAX_CONTENT_CHARS // 2]
+        parts.append(f"\n## 语音转录\n{text}")
 
     if frames:
         parts.append("\n## 关键帧描述")
@@ -118,15 +122,19 @@ def _format_note(
     duration = video_info.get("duration", "")
     url = video_info.get("url", "")
 
+    frontmatter = {
+        "title": title,
+        "bvid": bvid,
+        "author": author,
+        "duration": duration,
+        "url": url,
+        "date": date.today().isoformat(),
+        "tags": ["bilibili"],
+    }
+
     lines = [
         "---",
-        f'title: "{title}"',
-        f'bvid: "{bvid}"',
-        f'author: "{author}"',
-        f'duration: "{duration}"',
-        f'url: "{url}"',
-        f"date: {date.today().isoformat()}",
-        "tags: [bilibili]",
+        yaml.safe_dump(frontmatter, allow_unicode=True, default_flow_style=False).strip(),
         "---",
         "",
         f"# {title}",

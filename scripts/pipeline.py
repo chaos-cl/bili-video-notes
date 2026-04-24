@@ -20,15 +20,26 @@ from scripts.transcribe_audio import transcribe
 logger = logging.getLogger(__name__)
 
 
-def process_single(bvid: str, config: dict, work_dir: Path | None = None, provider: str | None = None) -> Path | None:
+def process_single(bvid: str, config: dict, work_dir: Path | None = None, provider: str | None = None, force: bool = False) -> Path | None:
     """处理单个视频的完整流水线"""
     notes_dir, images_dir = get_vault_paths(config)
 
     # 检查已有笔记
     existing = list(notes_dir.glob(f"*({bvid}).md"))
-    if existing:
+    if existing and not force:
         logger.info("笔记已存在，跳过: %s", existing[0])
         return existing[0]
+
+    if force:
+        for f in existing:
+            f.unlink()
+            logger.info("强制删除已有笔记: %s", f)
+        # 清理旧的帧和临时文件
+        old_frames = images_dir / bvid
+        if old_frames.exists():
+            for f in old_frames.iterdir():
+                f.unlink(missing_ok=True)
+            logger.info("清理旧帧目录: %s", old_frames)
 
     if work_dir is None:
         work_dir = get_work_dir(bvid)
@@ -36,17 +47,17 @@ def process_single(bvid: str, config: dict, work_dir: Path | None = None, provid
     frames_dir = images_dir / bvid
     frames_dir.mkdir(parents=True, exist_ok=True)
 
-    # 1. 获取数据
-    data = None
+    # 1. 获取数据（硬失败）
     try:
         data = fetch_all(bvid, work_dir)
     except Exception as e:
-        logger.warning("获取数据失败 %s: %s", bvid, e)
+        logger.error("获取数据失败 %s: %s", bvid, e)
+        return None
 
-    video_info = data["video"] if data else {"bvid": bvid, "title": bvid, "author": "", "duration": "", "url": f"https://www.bilibili.com/video/{bvid}", "description": ""}
-    subtitle_text = data["subtitle"]["text"] if data and data.get("subtitle", {}).get("available") else ""
-    comments = data["comments"] if data else []
-    audio_path = data["audio_path"] if data else None
+    video_info = data["video"]
+    subtitle_text = data["subtitle"]["text"] if data.get("subtitle", {}).get("available") else ""
+    comments = data["comments"]
+    audio_path = data["audio_path"]
 
     # 2. 语音转录（无字幕且有音频时）
     transcript_text = ""
@@ -54,7 +65,6 @@ def process_single(bvid: str, config: dict, work_dir: Path | None = None, provid
         try:
             result = transcribe(Path(audio_path), config)
             transcript_text = result["text"]
-            # 保存转录结果到 work 目录
             (work_dir / "transcript.txt").write_text(result["text"], encoding="utf-8")
             if result.get("srt"):
                 (work_dir / "transcript.srt").write_text(result["srt"], encoding="utf-8")
@@ -104,9 +114,11 @@ def run_pipeline(
     max_videos: int = 10,
     force: bool = False,
     provider: str | None = None,
+    config: dict | None = None,
 ) -> list[Path]:
     """运行完整流水线"""
-    config = load_config()
+    if config is None:
+        config = load_config()
     setup_logging("pipeline", config)
 
     logger.info("解析输入: %s (mode=%s)", raw_input, mode)
@@ -117,13 +129,7 @@ def run_pipeline(
     total = len(bvids)
     for i, bvid in enumerate(bvids, 1):
         progress(i, total, desc=bvid)
-        if force:
-            notes_dir, _ = get_vault_paths(config)
-            for existing in notes_dir.glob(f"*({bvid}).md"):
-                existing.unlink()
-                logger.info("强制删除已有笔记: %s", existing)
-
-        result = process_single(bvid, config, provider=provider)
+        result = process_single(bvid, config, provider=provider, force=force)
         if result:
             results.append(result)
             logger.info("[%d/%d] 完成: %s", i, total, result)
@@ -150,11 +156,8 @@ def main():
 
     args = parser.parse_args()
 
-    # 覆盖配置路径
-    if args.config:
-        config = load_config(args.config)
-    else:
-        config = load_config()
+    # 加载配置，--config 和 --vault 覆盖生效后传入 run_pipeline
+    config = load_config(args.config)
 
     if args.vault:
         config["obsidian"]["vault_path"] = args.vault
@@ -167,7 +170,10 @@ def main():
     else:
         raw_input, mode = args.bv, "bv"
 
-    results = run_pipeline(raw_input, mode=mode, max_videos=args.max, force=args.force, provider=args.provider)
+    results = run_pipeline(
+        raw_input, mode=mode, max_videos=args.max,
+        force=args.force, provider=args.provider, config=config,
+    )
     print(f"\n完成: {len(results)} 个笔记已生成")
 
 

@@ -1,9 +1,9 @@
 """本地语音转录 — mlx-whisper"""
 
-import os
+import logging
 from pathlib import Path
 
-import mlx_whisper
+logger = logging.getLogger(__name__)
 
 # ModelScope 缓存路径
 _MODELSCOPE_CACHE = Path.home() / ".cache" / "modelscope" / "hub" / "models"
@@ -36,6 +36,14 @@ def transcribe(audio_path: Path, config: dict) -> dict:
     Returns:
         {"text": str, "segments": list, "srt": str}
     """
+    try:
+        import mlx_whisper
+    except ImportError:
+        raise ImportError(
+            "mlx-whisper 未安装。语音转录需要 Apple Silicon Mac，请运行: "
+            "uv add mlx-whisper modelscope"
+        )
+
     wcfg = config["whisper"]
     model_name = wcfg["model"]
 

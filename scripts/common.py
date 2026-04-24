@@ -20,12 +20,17 @@ _PROJECT_ROOT = Path(__file__).resolve().parent.parent
 
 
 def load_config(config_path: str | None = None) -> dict:
-    """加载 config.yaml"""
+    """加载并校验 config.yaml"""
     path = Path(config_path) if config_path else _PROJECT_ROOT / "config.yaml"
     if not path.exists():
         raise FileNotFoundError(f"配置文件不存在: {path}")
-    with open(path) as f:
+    with open(path, encoding="utf-8") as f:
         config = yaml.safe_load(f)
+    if not isinstance(config, dict):
+        raise ValueError(f"配置文件格式错误: {path}，期望字典结构")
+    for section in ("obsidian", "omlx", "provider"):
+        if section not in config:
+            raise ValueError(f"配置文件缺少必填字段: {section}")
     if env_url := os.getenv("OMLX_BASE_URL"):
         config.setdefault("omlx", {})["base_url"] = env_url
     vault = config.get("obsidian", {}).get("vault_path", "")
@@ -35,7 +40,7 @@ def load_config(config_path: str | None = None) -> dict:
 
 
 def setup_logging(script_name: str, config: dict | None = None) -> logging.Logger:
-    """初始化日志，配置根 logger 使子模块日志也能写入文件"""
+    """初始化日志，使用命名 logger 避免状态泄漏"""
     cfg = config or {}
     log_cfg = cfg.get("logging", {})
     log_dir = _PROJECT_ROOT / log_cfg.get("dir", "logs")
@@ -45,29 +50,32 @@ def setup_logging(script_name: str, config: dict | None = None) -> logging.Logge
     timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
     log_file = log_dir / f"{script_name}_{timestamp}.log"
 
-    # 配置根 logger，这样 scripts.* 下所有模块都能输出
     root = logging.getLogger()
     root.setLevel(level)
 
-    # 避免重复添加 handler
-    has_file = any(isinstance(h, logging.FileHandler) for h in root.handlers)
-    if not has_file:
-        fmt = logging.Formatter("%(asctime)s [%(name)s %(levelname)s] %(message)s")
-        fh = logging.FileHandler(log_file, encoding="utf-8")
-        fh.setFormatter(fmt)
-        root.addHandler(fh)
-        ch = logging.StreamHandler(sys.stdout)
-        ch.setFormatter(fmt)
-        root.addHandler(ch)
+    # 移除并关闭旧的 handler，避免重复和文件句柄泄漏
+    for h in root.handlers[:]:
+        if isinstance(h, logging.FileHandler):
+            h.close()
+        root.removeHandler(h)
+
+    fmt = logging.Formatter("%(asctime)s [%(name)s %(levelname)s] %(message)s")
+    fh = logging.FileHandler(log_file, encoding="utf-8")
+    fh.setFormatter(fmt)
+    root.addHandler(fh)
+    ch = logging.StreamHandler(sys.stdout)
+    ch.setFormatter(fmt)
+    root.addHandler(ch)
 
     return logging.getLogger(script_name)
 
 
 def get_omlx_client(config: dict) -> OpenAI:
     """获取 oMLX OpenAI 兼容客户端"""
+    api_key = os.getenv(config["omlx"].get("api_key_env", "OMLX_API_KEY"), "")
     return OpenAI(
         base_url=config["omlx"]["base_url"],
-        api_key=config["omlx"].get("api_key", ""),
+        api_key=api_key,
     )
 
 
@@ -90,7 +98,7 @@ def get_llm_client(config: dict, provider: str | None = None):
     else:
         client = OpenAI(
             base_url=config["omlx"]["base_url"],
-            api_key=config["omlx"].get("api_key", ""),
+            api_key=os.getenv(config["omlx"].get("api_key_env", "OMLX_API_KEY"), ""),
         )
         return client, config["omlx"]["llm_model"], "openai"
 
@@ -121,10 +129,15 @@ def get_work_dir(bvid: str) -> Path:
 
 
 def get_vault_paths(config: dict) -> tuple[Path, Path]:
-    """返回 (notes_dir, images_dir)"""
+    """返回 (notes_dir, images_dir)，校验路径不跳出 vault"""
     obs = config["obsidian"]
-    vault = Path(obs["vault_path"])
-    return vault / obs["notes_dir"], vault / obs["images_dir"]
+    vault = Path(obs["vault_path"]).resolve()
+    notes_dir = (vault / obs["notes_dir"]).resolve()
+    images_dir = (vault / obs["images_dir"]).resolve()
+    for d in (notes_dir, images_dir):
+        if not str(d).startswith(str(vault)):
+            raise ValueError(f"路径 {d} 跳出了 vault 根目录 {vault}，请检查配置")
+    return notes_dir, images_dir
 
 
 def progress(current: int, total: int, desc: str = ""):
